@@ -43,6 +43,18 @@ parser.add_argument(
     type=float,
     help="scale of style"
 )
+parser.add_argument(
+    "--prompt",
+    type=str,
+    default="a woman",
+    help="prompt"
+)
+parser.add_argument(
+    "--negative_prompt",
+    type=str,
+    default="monochrome, lowres, bad anatomy, worst quality, low quality",
+    help="negative prompt"
+)
 args = parser.parse_args()
 
 pipeline = AutoPipelineForText2Image.from_pretrained(
@@ -50,22 +62,21 @@ pipeline = AutoPipelineForText2Image.from_pretrained(
     torch_dtype=torch.float16,
     variant="fp16"
 ).to("cuda")
-pipeline.scheduler = DPMSolverMultistepScheduler(
-        num_train_timesteps=1000,
-        beta_start=0.00085,
-        beta_end=0.012,
-        beta_schedule="scaled_linear",
-        steps_offset=1,
-        algorithm_type="sde-dpmsolver++",
-        use_karras_sigmas=True
+pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+    pipeline.scheduler.config,
+    algorithm_type="sde-dpmsolver++",
+    use_karras_sigmas=True
 )
+
+prompt = args.prompt
+negative_prompt = args.negative_prompt
 
 plusface_scale_list = [args.plusface_scale] if args.plusface_scale else [0.1, 0.3, 0.5]
 faceid_scale_list = [args.faceid_scale] if args.faceid_scale else [0.3, 0.5, 0.7, 0.9]
 
-Path("results").mkdir(exist_ok=True)
-
 if args.style:
+    save_folder = "results_with_style"
+    Path(save_folder).mkdir(exist_ok=True)
     style_scale_list = [args.style_scale] if args.style_scale else [0.3, 0.5]
     # text2image with 3 image embeddings
     pipeline.load_ip_adapter(
@@ -87,9 +98,9 @@ if args.style:
     for (style_scale, plusface_scale, faceid_scale) in itertools.product(style_scale_list, plusface_scale_list, faceid_scale_list):
         pipeline.set_ip_adapter_scale([style_scale, plusface_scale, faceid_scale])
         image = pipeline(
-            prompt="a woman",
+            prompt=prompt,
             ip_adapter_image_embeds=image_embeds,
-            negative_prompt="monochrome, lowres, bad anatomy, worst quality, low quality", 
+            negative_prompt=negative_prompt, 
             num_inference_steps=50,
             num_images_per_prompt=1,
             guidance_scale = 7.5,
@@ -99,9 +110,11 @@ if args.style:
         ).images[0]
 
         save_fname = f"plusface{plusface_scale}_faceid{faceid_scale}_with_style{style_scale}.png"
-        image.save(Path("results", save_fname).as_posix())
+        image.save(Path(save_folder, save_fname).as_posix())
 
 else:
+    save_folder = "results_without_style"
+    Path(save_folder).mkdir(exist_ok=True)
     # text2image with 2 image embeddings
     pipeline.load_ip_adapter(
         ["IP-Adapter", "IP-Adapter-FaceID"],
@@ -120,9 +133,9 @@ else:
     for (plusface_scale, faceid_scale) in itertools.product(plusface_scale_list, faceid_scale_list):
         pipeline.set_ip_adapter_scale([plusface_scale, faceid_scale])
         image = pipeline(
-            prompt="a woman",
+            prompt=prompt,
             ip_adapter_image_embeds=image_embeds,
-            negative_prompt="monochrome, lowres, bad anatomy, worst quality, low quality", 
+            negative_prompt=negative_prompt, 
             num_inference_steps=50,
             num_images_per_prompt=1,
             guidance_scale = 7.5,
@@ -132,4 +145,4 @@ else:
         ).images[0]
 
         save_fname = f"plusface{plusface_scale}_faceid{faceid_scale}.png"
-        image.save(Path("results", save_fname).as_posix())
+        image.save(Path(save_folder, save_fname).as_posix())
