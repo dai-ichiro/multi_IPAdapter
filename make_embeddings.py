@@ -27,35 +27,29 @@ def cref_embeddings(pipeline, folder):
         do_classifier_free_guidance=True
     )
     torch.save(image_embeds_plusface, "plusface.ipadpt")
-    pipeline.unload_ip_adapter()
 
     # embeddings of ip-adapter faceid
-    pipeline.load_ip_adapter(
-        "IP-Adapter-FaceID",
-        subfolder=None,
-        weight_name="ip-adapter-faceid_sdxl.bin",
-        image_encoder_folder=None
-    )
-    ref_images = []
+    ref_images_embeds = []
+    ref_unc_images_embeds = []
     app = FaceAnalysis(name="buffalo_l", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
     app.prepare(ctx_id=0, det_size=(640, 640))
     for im in face_images:
         image = cv2.cvtColor(np.asarray(im), cv2.COLOR_BGR2RGB)
         faces = app.get(image)
-        image = torch.from_numpy(faces[0].normed_embedding)
-        ref_images.append(image.unsqueeze(0))
-    ref_images = torch.cat(ref_images, dim=0)
+        if len(faces) > 0:
+            image = torch.from_numpy(faces[0].normed_embedding)
+            image_embeds = image.unsqueeze(0)
+            uncond_image_embeds = torch.zeros_like(image_embeds)
+            ref_images_embeds.append(image_embeds)
+            ref_unc_images_embeds.append(uncond_image_embeds)
 
-    print(f"InsightFace: {len(face_images)} face images, {len(ref_images)} faces detected")
-    assert len(ref_images) > 0, "face detection for faceid failed."
+    print(f"InsightFace: {len(face_images)} face images, {len(ref_images_embeds)} faces detected")
+    assert len(ref_images_embeds) > 0, "face detection for faceid failed."
+    
+    ref_images_embeds = torch.stack(ref_images_embeds, dim=0)
+    ref_unc_images_embeds = torch.stack(ref_unc_images_embeds, dim=0)
+    image_embeds_faceid = [torch.cat([ref_unc_images_embeds, ref_images_embeds], dim=0).to(device="cuda", dtype=torch.float16)]
 
-    image_embeds_faceid = pipeline.prepare_ip_adapter_image_embeds(
-        ip_adapter_image=[ref_images],
-        ip_adapter_image_embeds=None,
-        device="cuda",
-        num_images_per_prompt=1,
-        do_classifier_free_guidance=True,
-    )
     torch.save(image_embeds_faceid, "faceid.ipadpt")
 
 def sref_embeddings(pipeline, folder):
